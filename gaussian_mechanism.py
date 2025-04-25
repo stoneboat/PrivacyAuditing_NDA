@@ -10,15 +10,58 @@ Example running commands:
 python gaussian_mechanism.py \
   --data data/heart_failure_clinical_records_dataset.csv \
   --epsilon 1.0 \
-  --delta 1e-5
+  --delta 1e-5 \
+  --samples 100
 """
 
 import argparse
 import numpy as np
 import pandas as pd
 import sys
-from opacus.accountants import GaussianAccountant
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
+
+def compute_sigma(epsilon: float, delta: float) -> float:
+    """
+    Compute the noise scale (sigma) for the Gaussian mechanism.
+    
+    Args:
+        epsilon: Privacy budget
+        delta: Privacy parameter
+        
+    Returns:
+        Noise scale (sigma)
+    """
+    # Using the analytic Gaussian mechanism formula
+    # See: https://arxiv.org/abs/1805.06530
+    return np.sqrt(2 * np.log(1.25 / delta)) / epsilon
+
+def gaussian_mechanism(data: np.ndarray, epsilon: float, delta: float, num_samples: int = 1) -> List[np.ndarray]:
+    """
+    Apply Gaussian mechanism to compute private average.
+    
+    Args:
+        data: Input data array (normalized to [0,1])
+        epsilon: Privacy budget
+        delta: Privacy parameter
+        num_samples: Number of noisy copies to generate
+        
+    Returns:
+        List of private averages
+    """
+    # Compute sensitivity (assuming data is normalized to [0,1])
+    sensitivity = 1.0 / len(data)
+    
+    # Compute noise scale (sigma)
+    sigma = compute_sigma(epsilon, delta)
+    
+    # Generate multiple noisy copies
+    private_averages = []
+    for _ in range(num_samples):
+        noise = np.random.normal(0, sigma * sensitivity, size=data.shape[1])
+        private_average = np.mean(data, axis=0) + noise
+        private_averages.append(private_average)
+    
+    return private_averages
 
 def load_and_validate_data(file_path: str) -> Tuple[pd.DataFrame, np.ndarray]:
     """
@@ -70,56 +113,37 @@ def normalize_data(data: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray
     
     return normalized, data_min, data_max
 
-def gaussian_mechanism(data: np.ndarray, epsilon: float, delta: float) -> np.ndarray:
-    """
-    Apply Gaussian mechanism to compute private average.
-    
-    Args:
-        data: Input data array (normalized to [0,1])
-        epsilon: Privacy budget
-        delta: Privacy parameter
-        
-    Returns:
-        Private average of the data
-    """
-    # Compute sensitivity (assuming data is normalized to [0,1])
-    sensitivity = 1.0 / len(data)
-    
-    # Compute noise scale (sigma)
-    accountant = GaussianAccountant()
-    sigma = accountant.compute_sigma(epsilon, delta)
-    
-    # Add Gaussian noise
-    noise = np.random.normal(0, sigma * sensitivity, size=data.shape[1])
-    private_average = np.mean(data, axis=0) + noise
-    
-    return private_average
-
 def print_results(df: pd.DataFrame, original_avg: np.ndarray, 
-                 private_avg: np.ndarray, epsilon: float, delta: float) -> None:
+                 private_averages: List[np.ndarray], epsilon: float, delta: float) -> None:
     """
     Print the results in a formatted table.
     
     Args:
         df: Original DataFrame (for column names)
         original_avg: Original average values
-        private_avg: Private average values
+        private_averages: List of private average values
         epsilon: Privacy budget
         delta: Privacy parameter
     """
+    # Convert list of private averages to numpy array for statistics
+    private_array = np.array(private_averages)
+    empirical_mean = np.mean(private_array, axis=0)
+    empirical_std = np.std(private_array, axis=0)
+    
     print("\nResults:")
-    print("-" * 80)
-    print(f"{'Column':<20} {'Original Average':<20} {'Private Average':<20} {'Difference':<20}")
-    print("-" * 80)
+    print("-" * 100)
+    print(f"{'Column':<20} {'Original Average':<20} {'Empirical Mean':<20} {'Empirical Std':<20} {'Max Difference':<20}")
+    print("-" * 100)
     
-    for col, orig, priv in zip(df.columns, original_avg, private_avg):
-        diff = abs(orig - priv)
-        print(f"{col:<20} {orig:<20.4f} {priv:<20.4f} {diff:<20.4f}")
+    for col, orig, mean, std in zip(df.columns, original_avg, empirical_mean, empirical_std):
+        max_diff = np.max(np.abs(private_array[:, df.columns.get_loc(col)] - orig))
+        print(f"{col:<20} {orig:<20.4f} {mean:<20.4f} {std:<20.4f} {max_diff:<20.4f}")
     
-    print("-" * 80)
+    print("-" * 100)
     print(f"Privacy budget (ε): {epsilon}")
     print(f"Privacy parameter (δ): {delta}")
-    print(f"Maximum difference: {np.max(np.abs(original_avg - private_avg)):.4f}")
+    print(f"Number of samples: {len(private_averages)}")
+    print(f"Maximum difference across all columns: {np.max(np.abs(private_array - original_avg)):.4f}")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -131,6 +155,8 @@ def main():
                        help="Privacy budget (smaller values = more privacy)")
     parser.add_argument("--delta", type=float, default=1e-5,
                        help="Privacy parameter (probability of privacy failure)")
+    parser.add_argument("--samples", type=int, default=100,
+                       help="Number of noisy copies to generate")
     
     args = parser.parse_args()
 
@@ -144,15 +170,17 @@ def main():
         print("Normalizing data...")
         X_normalized, X_min, X_max = normalize_data(X)
         
-        # Compute private average
-        print("Computing private average...")
-        private_average = gaussian_mechanism(X_normalized, args.epsilon, args.delta)
+        # Compute private averages
+        print(f"Computing {args.samples} private averages...")
+        private_averages = gaussian_mechanism(X_normalized, args.epsilon, args.delta, args.samples)
         
-        # Denormalize the result
-        private_average_denormalized = private_average * (X_max - X_min) + X_min
+        # Denormalize the results
+        private_averages_denormalized = [
+            avg * (X_max - X_min) + X_min for avg in private_averages
+        ]
         
         # Print results
-        print_results(df, np.mean(X, axis=0), private_average_denormalized, 
+        print_results(df, np.mean(X, axis=0), private_averages_denormalized, 
                      args.epsilon, args.delta)
         
     except Exception as e:

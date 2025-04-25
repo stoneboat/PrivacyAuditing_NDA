@@ -2,7 +2,7 @@
 """
 Example running commands:
 python mlp_dropout.py \
-  --data heart_failure_clinical_records_dataset.csv \
+  --data data/heart_failure_clinical_records_dataset.csv \
   --label_name DEATH_EVENT \
   --test_size 0.1 \
   --batch_size 32 \
