@@ -151,7 +151,7 @@ def main():
     parser.add_argument("--eval_dropout_masked", type=float, default=0.5)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output_file_path", type=str, default="prob_output.csv")
+    parser.add_argument("--output_file_path", type=str, default="tmp_data/prob_output.csv")
     parser.add_argument("--repeats", type=int, default=10, help="Number of times to run the model")
 
     args = parser.parse_args()
@@ -197,7 +197,7 @@ def main():
 
     # 7. Training loop
     best_acc = 0.0
-    best_ckpt = "best_model.pt"
+    best_ckpt = "tmp_data/best_model.pt"
     for epoch in range(1, args.epochs + 1):
         tr_loss = train_epoch(model, tr_loader, criterion, optim, args.device)
         _, acc_orig = evaluate(model, te_loader, args.device)
@@ -237,7 +237,7 @@ def main():
         'prob_original': score1_flat.numpy(),
         'prob_masked': score2_flat.numpy()
     })
-    df.to_csv('prob_output.csv', index=False)
+    df.to_csv(args.output_file_path, index=False)
 
 
 if __name__ == "__main__":

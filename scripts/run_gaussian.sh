@@ -27,6 +27,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Print the parameters being used
+echo "Running Gaussian mechanism with:"
+echo "Epsilon: $EPSILON"
+echo "Delta: $DELTA"
+echo "Samples: $SAMPLES"
+
 # Run the Gaussian mechanism
 python gaussian_mechanism.py \
     --data data/heart_failure_clinical_records_dataset.csv \
